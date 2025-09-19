@@ -7,7 +7,7 @@ load_dotenv()
 
 # instatiate a chat model:
 # choice 1: OpenAI "gpt-5" for chat or "o4-mini-deep-research" for the specific deep research
-llm = ChatOpenAI(model="gpt-4o-mini")
+#llm = ChatOpenAI(model="gpt-4o-mini")
 
 #choice 2: Anthropic
 #llm2 = ChatAnthropic(model= "claude-3-7-sonnet-20250219")
@@ -23,3 +23,59 @@ llm3 = init_chat_model("gemini-2.5-flash", model_provider="google_genai")
 
 # Create prompt template:
 
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+
+## we define a class to specify the type of content that the llm should generate
+## llm takes a prompt and llm generates a response using the schema of the class we defined
+
+class ResearchResponse(BaseModel): #inherit from BaseModel class and we can add whatever we want
+    # define the attributes:
+    topic:str
+    summary:str
+    sources:list[str]
+    tools_used:list[str]
+
+# instatiate a parser: can also be done with json
+## parser takes the output of the llm and parses it into the model class
+parser = PydanticOutputParser(pydantic_object=ResearchResponse)
+
+# define the prompt:
+prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system", #1-define the ai-agent by giving it its role, 2- main task, 3- how to reponse
+            """
+            You are a research assistant that will help generate a research paper. 
+            Answer the user query and use the necessary tools.
+            Wrap the output in this format and provide no other text\n{format_instructions}
+            """,
+        ),
+        ("placeholder", "{chat_history}"),
+        ("human", "{query}"),
+        ("placeholder","{agent_scratchpad}"),
+    ]
+).partial(format_instructions=parser.get_format_instructions()) # parser takes the model, parses it as sting and gives it to the llm as part of the system prompt
+
+# define the agent:
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+
+agent = create_tool_calling_agent(
+    llm3,
+    prompt=prompt,
+    tools=[]
+
+)
+agent_executor = AgentExecutor(agent=agent, tools= [], verbose=True)
+
+# unstructured reponse raw:
+raw_response = agent_executor.invoke({"query": "what is the biggest airplane?"}) #query is from the model
+#print(raw_response)
+
+# structured response: using the parser:
+structured_response = parser.parse(raw_response.get("output")) # because the raw respone is a dict {"query": str, "output": array[str]
+
+try:
+    print(structured_response.summary)
+except Exception as e:
+    print("Error parsing the response: ", e, "RAW RESPONSE: \n", raw_response )
